@@ -232,7 +232,7 @@ module DatabaseCleaner::ActiveRecord
 
     def clean
       connection = connection_class.connection
-      connection.disable_referential_integrity do
+      disable_referential_integrity_hack!(connection) do
         if pre_count? && connection.respond_to?(:pre_count_truncate_tables)
           connection.pre_count_truncate_tables(tables_to_truncate(connection), {:reset_ids => reset_ids?})
         else
@@ -270,6 +270,18 @@ module DatabaseCleaner::ActiveRecord
 
     def reset_ids?
       @reset_ids != false
+    end
+
+    # FIXME: Move to adapters
+    def disable_referential_integrity_hack!(connection)
+      if defined?(ActiveRecord::ConnectionAdapters::SQLServerAdapter) \
+          && connection.is_a?(ActiveRecord::ConnectionAdapters::SQLServerAdapter)
+        yield
+      else
+        connection.disable_referential_integrity do
+          yield
+        end
+      end
     end
   end
 end

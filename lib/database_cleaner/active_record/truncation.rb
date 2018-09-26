@@ -15,6 +15,8 @@ end
 require "database_cleaner/generic/truncation"
 require 'database_cleaner/active_record/base'
 
+require 'tsort'
+
 module DatabaseCleaner
   module ConnectionAdapters
 
@@ -223,25 +225,37 @@ module DatabaseCleaner
           foreign_keys = foreign_keys_for_truncation
 
           targeted_tables, not_targeted_tables = tables.partition { |t| foreign_keys.key?(t) }
-          source_tables = foreign_keys.values_at(*tables).compact.flatten.uniq
-          # FIXME: cache has_rows
-          if options[:pre_count]
-            populated_source_tables = source_tables.select { |t| has_rows?(t) }
-          else
-            populated_source_tables = source_tables
-          end
 
           not_targeted_tables.each { |t| truncate_table_by_truncating(t) }
 
-          disable_foreign_keys(populated_source_tables) do
-            targeted_tables.each { |t| truncate_table_by_deleting(t, options) }
+          OrderedDeletion.new(targeted_tables, foreign_keys).each_strongly_connected_component do |c|
+            disable_foreign_keys_within_component(c) do
+              c.each { |t| truncate_table_by_deleting(t, options) }
+            end
           end
-
-          @used_identities = nil
         end
 
         def pre_count_truncate_tables(tables, options = {:reset_ids => true})
+          @used_identities = nil
           truncate_tables(tables.select { |t| has_been_used?(t) }, options.merge(pre_count: true))
+        end
+
+        class OrderedDeletion
+          include TSort
+
+          def initialize(tables, foreign_keys)
+            @tables = tables
+            @foreign_keys = foreign_keys
+          end
+
+          def tsort_each_node(&block)
+            @tables.each(&block)
+          end
+
+          def tsort_each_child(node, &block)
+            children = @foreign_keys[node].to_a & @tables
+            children.each(&block)
+          end
         end
 
         private
@@ -253,6 +267,16 @@ module DatabaseCleaner
         def has_been_used?(table)
           identity_changed = used_identities[table] # three-valued logic (nil, true, false)
           identity_changed.nil? ? has_rows?(table) : identity_changed
+        end
+
+        def disable_foreign_keys_within_component(tables)
+          if tables.length <= 1
+            yield
+          else
+            disable_foreign_keys(tables) do
+              yield
+            end
+          end
         end
 
         def disable_foreign_keys(tables)

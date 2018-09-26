@@ -200,98 +200,116 @@ module DatabaseCleaner
     end
 
     module SQLServerAdapter
-      def truncate_tables(tables, options = {})
-        foreign_keys = foreign_keys_for_truncation
-
-        targeted_tables, not_targeted_tables = tables.partition { |t| foreign_keys.key?(t) }
-        source_tables = foreign_keys.values_at(*tables).compact.flatten.uniq
-        # FIXME: cache has_rows
-        if options[:pre_count]
-          populated_source_tables = source_tables.select { |t| has_rows?(t) }
-        else
-          populated_source_tables = source_tables
-        end
-
-        not_targeted_tables.each { |t| truncate_table_by_truncating(t) }
-
-        disable_foreign_keys_for_deletion(populated_source_tables) do
-          targeted_tables.each { |t| truncate_table_by_deleting(t, options) }
-        end
-
-        @database_cleaner_used_identities = nil
-        @database_cleaner_seeds = nil
+      def truncate_tables(tables)
+        database_cleaner.truncate_tables(tables)
       end
 
       def pre_count_truncate_tables(tables, options = {:reset_ids => true})
-        truncate_tables(tables.select { |t| has_been_used?(t) }, options.merge(pre_count: true))
+        database_cleaner.pre_count_truncate_tables(tables, options)
       end
 
       private
 
-      def has_rows?(table)
-        select_value("SELECT CAST(1 as BIT) WHERE EXISTS (SELECT 1 FROM #{quote_table_name(table)})")
+      def database_cleaner
+        @database_cleaner ||= Cleaner.new(self)
       end
 
-      def has_been_used?(table)
-        identity_changed = used_identities[table] # three-valued logic (nil, true, false)
-        identity_changed.nil? ? has_rows?(table) : identity_changed
-      end
-
-      def disable_foreign_keys_for_deletion(tables)
-        begin
-          tables.each { |t| execute "ALTER TABLE #{quote_table_name(t)} NOCHECK CONSTRAINT ALL" }
-          yield
-        ensure
-          tables.each { |t| execute "ALTER TABLE #{quote_table_name(t)} CHECK CONSTRAINT ALL" }
+      class Cleaner
+        def initialize(connection)
+          @con = connection
         end
-      end
 
-      def truncate_table_by_truncating(table_name)
-        execute("TRUNCATE TABLE #{quote_table_name(table_name)}")
-      end
+        def truncate_tables(tables, options = {})
+          foreign_keys = foreign_keys_for_truncation
 
-      def truncate_table_by_deleting(table_name, options = {})
-        execute("DELETE FROM #{quote_table_name(table_name)}")
-        return unless options[:reset_ids]
-
-        if seed = seeds[table_name]
-          execute("DBCC CHECKIDENT(#{quote_table_name(table_name)}, RESEED, #{seed - 1}) WITH NO_INFOMSGS")
-        end
-      end
-
-      def seeds
-        @database_cleaner_seeds ||= select_rows(<<-SQL).to_h
-          SELECT t.name, c.seed_value
-          FROM sys.identity_columns c
-          JOIN sys.tables t ON t.object_id = c.object_id
-        SQL
-      end
-
-      def used_identities
-        @database_cleaner_used_identities ||= select_rows(<<-SQL).to_h
-          SELECT t.name, CAST(CASE WHEN c.last_value >= c.seed_value THEN 1 ELSE 0 END AS BIT)
-          FROM sys.identity_columns c
-          JOIN sys.tables t ON c.object_id = t.object_id
-        SQL
-      end
-
-      def foreign_keys_for_truncation
-        # FIXME: caching should depend on cache_tables option
-        @foreign_keys_for_truncation ||=
-          begin
-            foreign_keys = select_rows(<<-SQL)
-              SELECT DISTINCT t_source.name source, t_target.name target
-              FROM sys.foreign_keys fk
-              JOIN sys.tables t_source ON t_source.object_id = fk.parent_object_id
-              JOIN sys.tables t_target ON t_target.object_id = fk.referenced_object_id
-            SQL
-
-            by_target = {}
-            foreign_keys.each do |(source_table, target_table)|
-              (by_target[target_table] ||= []).push(source_table)
-            end
-            by_target
+          targeted_tables, not_targeted_tables = tables.partition { |t| foreign_keys.key?(t) }
+          source_tables = foreign_keys.values_at(*tables).compact.flatten.uniq
+          # FIXME: cache has_rows
+          if options[:pre_count]
+            populated_source_tables = source_tables.select { |t| has_rows?(t) }
+          else
+            populated_source_tables = source_tables
           end
+
+          not_targeted_tables.each { |t| truncate_table_by_truncating(t) }
+
+          disable_foreign_keys(populated_source_tables) do
+            targeted_tables.each { |t| truncate_table_by_deleting(t, options) }
+          end
+
+          @used_identities = nil
+        end
+
+        def pre_count_truncate_tables(tables, options = {:reset_ids => true})
+          truncate_tables(tables.select { |t| has_been_used?(t) }, options.merge(pre_count: true))
+        end
+
+        private
+
+        def has_rows?(table)
+          @con.select_value("SELECT CAST(1 as BIT) WHERE EXISTS (SELECT 1 FROM #{@con.quote_table_name(table)})")
+        end
+
+        def has_been_used?(table)
+          identity_changed = used_identities[table] # three-valued logic (nil, true, false)
+          identity_changed.nil? ? has_rows?(table) : identity_changed
+        end
+
+        def disable_foreign_keys(tables)
+          begin
+            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} NOCHECK CONSTRAINT ALL" }
+            yield
+          ensure
+            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} CHECK CONSTRAINT ALL" }
+          end
+        end
+
+        def truncate_table_by_truncating(table_name)
+          @con.execute("TRUNCATE TABLE #{@con.quote_table_name(table_name)}")
+        end
+
+        def truncate_table_by_deleting(table_name, options = {})
+          @con.execute("DELETE FROM #{@con.quote_table_name(table_name)}")
+          return unless options[:reset_ids]
+
+          if seed = seeds[table_name]
+            @con.execute("DBCC CHECKIDENT(#{@con.quote_table_name(table_name)}, RESEED, #{seed - 1}) WITH NO_INFOMSGS")
+          end
+        end
+
+        def seeds
+          # FIXME: permanent caching should depend on cache_tables option
+          @seeds ||= @con.select_rows(<<-SQL).to_h
+            SELECT t.name, c.seed_value
+            FROM sys.identity_columns c
+            JOIN sys.tables t ON t.object_id = c.object_id
+          SQL
+        end
+
+        def used_identities
+          @used_identities ||= @con.select_rows(<<-SQL).to_h
+            SELECT t.name, CAST(CASE WHEN c.last_value >= c.seed_value THEN 1 ELSE 0 END AS BIT)
+            FROM sys.identity_columns c
+            JOIN sys.tables t ON c.object_id = t.object_id
+          SQL
+        end
+
+        def foreign_keys_for_truncation
+          # FIXME: caching should depend on cache_tables option
+          @foreign_keys_for_truncation ||=
+            begin
+              foreign_keys = @con.select_rows(<<-SQL)
+              SELECT DISTINCT t_source.name source, t_target.name target
+                FROM sys.foreign_keys fk
+                JOIN sys.tables t_source ON t_source.object_id = fk.parent_object_id
+                JOIN sys.tables t_target ON t_target.object_id = fk.referenced_object_id
+              SQL
+
+              foreign_keys.each_with_object({}) do |(source_table, target_table), hash|
+                (hash[target_table] ||= []).push(source_table)
+              end
+            end
+        end
       end
     end
   end

@@ -206,8 +206,8 @@ module DatabaseCleaner
         database_cleaner.truncate_tables(tables)
       end
 
-      def pre_count_truncate_tables(tables, options = {:reset_ids => true})
-        database_cleaner.pre_count_truncate_tables(tables, options)
+      def pre_count_truncate_tables(tables, _)
+        database_cleaner.pre_count_truncate_tables(tables)
       end
 
       private
@@ -222,7 +222,7 @@ module DatabaseCleaner
           @schema = DatabaseSchema.new(@con)
         end
 
-        def truncate_tables(tables, options = {})
+        def truncate_tables(tables)
           foreign_keys = @schema.foreign_keys
 
           targeted_tables, not_targeted_tables = tables.partition { |t| foreign_keys.key?(t) }
@@ -231,14 +231,14 @@ module DatabaseCleaner
 
           OrderedDeletion.new(targeted_tables, foreign_keys).each_strongly_connected_component do |c|
             disable_foreign_keys_within_component(c) do
-              c.each { |t| truncate_table_by_deleting(t, options) }
+              c.each { |t| truncate_table_by_deleting(t) }
             end
           end
         end
 
-        def pre_count_truncate_tables(tables, options = {:reset_ids => true})
+        def pre_count_truncate_tables(tables)
           db = DatabaseState.new(@con)
-          truncate_tables(tables.select { |t| db.has_been_used?(t) }, options.merge(pre_count: true))
+          truncate_tables(tables.select { |t| db.has_been_used?(t) })
         end
 
         class OrderedDeletion
@@ -275,9 +275,8 @@ module DatabaseCleaner
           @con.execute("TRUNCATE TABLE #{@con.quote_table_name(table_name)}")
         end
 
-        def truncate_table_by_deleting(table_name, options = {})
+        def truncate_table_by_deleting(table_name)
           @con.execute("DELETE FROM #{@con.quote_table_name(table_name)}")
-          return unless options[:reset_ids]
 
           if seed = @schema.seeds[table_name]
             @con.execute("DBCC CHECKIDENT(#{@con.quote_table_name(table_name)}, RESEED, #{seed - 1}) WITH NO_INFOMSGS")

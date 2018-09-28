@@ -219,10 +219,11 @@ module DatabaseCleaner
       class Cleaner
         def initialize(connection)
           @con = connection
+          @schema = DatabaseSchema.new(@con)
         end
 
         def truncate_tables(tables, options = {})
-          foreign_keys = foreign_keys_for_truncation
+          foreign_keys = @schema.foreign_keys
 
           targeted_tables, not_targeted_tables = tables.partition { |t| foreign_keys.key?(t) }
 
@@ -264,18 +265,9 @@ module DatabaseCleaner
           if tables.length <= 1
             yield
           else
-            disable_foreign_keys(tables) do
+            @schema.disable_foreign_keys(tables) do
               yield
             end
-          end
-        end
-
-        def disable_foreign_keys(tables)
-          begin
-            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} NOCHECK CONSTRAINT ALL" }
-            yield
-          ensure
-            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} CHECK CONSTRAINT ALL" }
           end
         end
 
@@ -287,8 +279,23 @@ module DatabaseCleaner
           @con.execute("DELETE FROM #{@con.quote_table_name(table_name)}")
           return unless options[:reset_ids]
 
-          if seed = seeds[table_name]
+          if seed = @schema.seeds[table_name]
             @con.execute("DBCC CHECKIDENT(#{@con.quote_table_name(table_name)}, RESEED, #{seed - 1}) WITH NO_INFOMSGS")
+          end
+        end
+      end
+
+      class DatabaseSchema
+        def initialize(connection)
+          @con = connection
+        end
+
+        def disable_foreign_keys(tables)
+          begin
+            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} NOCHECK CONSTRAINT ALL" }
+            yield
+          ensure
+            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} CHECK CONSTRAINT ALL" }
           end
         end
 
@@ -301,12 +308,12 @@ module DatabaseCleaner
           SQL
         end
 
-        def foreign_keys_for_truncation
+        def foreign_keys
           # FIXME: caching should depend on cache_tables option
-          @foreign_keys_for_truncation ||=
+          @foreign_keys ||=
             begin
               foreign_keys = @con.select_rows(<<-SQL)
-              SELECT DISTINCT t_source.name source, t_target.name target
+                SELECT DISTINCT t_source.name source, t_target.name target
                 FROM sys.foreign_keys fk
                 JOIN sys.tables t_source ON t_source.object_id = fk.parent_object_id
                 JOIN sys.tables t_target ON t_target.object_id = fk.referenced_object_id

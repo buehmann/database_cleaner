@@ -236,8 +236,8 @@ module DatabaseCleaner
         end
 
         def pre_count_truncate_tables(tables, options = {:reset_ids => true})
-          @used_identities = nil
-          truncate_tables(tables.select { |t| has_been_used?(t) }, options.merge(pre_count: true))
+          db = DatabaseState.new(@con)
+          truncate_tables(tables.select { |t| db.has_been_used?(t) }, options.merge(pre_count: true))
         end
 
         class OrderedDeletion
@@ -259,15 +259,6 @@ module DatabaseCleaner
         end
 
         private
-
-        def has_rows?(table)
-          @con.select_value("SELECT CAST(1 as BIT) WHERE EXISTS (SELECT 1 FROM #{@con.quote_table_name(table)})")
-        end
-
-        def has_been_used?(table)
-          identity_changed = used_identities[table] # three-valued logic (nil, true, false)
-          identity_changed.nil? ? has_rows?(table) : identity_changed
-        end
 
         def disable_foreign_keys_within_component(tables)
           if tables.length <= 1
@@ -310,14 +301,6 @@ module DatabaseCleaner
           SQL
         end
 
-        def used_identities
-          @used_identities ||= @con.select_rows(<<-SQL).to_h
-            SELECT t.name, CAST(CASE WHEN c.last_value >= c.seed_value THEN 1 ELSE 0 END AS BIT)
-            FROM sys.identity_columns c
-            JOIN sys.tables t ON c.object_id = t.object_id
-          SQL
-        end
-
         def foreign_keys_for_truncation
           # FIXME: caching should depend on cache_tables option
           @foreign_keys_for_truncation ||=
@@ -333,6 +316,31 @@ module DatabaseCleaner
                 (hash[target_table] ||= []).push(source_table)
               end
             end
+        end
+      end
+
+      class DatabaseState
+        def initialize(connection)
+          @con = connection
+        end
+
+        def has_been_used?(table)
+          identity_changed = used_identities[table] # three-valued logic (nil, true, false)
+          identity_changed.nil? ? has_rows?(table) : identity_changed
+        end
+
+        private
+
+        def has_rows?(table)
+          @con.select_value("SELECT CAST(1 as BIT) WHERE EXISTS (SELECT 1 FROM #{@con.quote_table_name(table)})")
+        end
+
+        def used_identities
+          @used_identities ||= @con.select_rows(<<-SQL).to_h
+            SELECT t.name, CAST(CASE WHEN c.last_value >= c.seed_value THEN 1 ELSE 0 END AS BIT)
+            FROM sys.identity_columns c
+            JOIN sys.tables t ON c.object_id = t.object_id
+          SQL
         end
       end
     end

@@ -53,7 +53,8 @@ module DatabaseCleaner
 
       def pre_count_truncate_tables(tables, options = {:reset_ids => true})
         filter = options[:reset_ids] ? method(:has_been_used?) : method(:has_rows?)
-        truncate_tables(tables.select(&filter))
+        filtered_tables = with_uncached_information_schema { tables.select(&filter) }
+        truncate_tables(filtered_tables)
       end
 
       private
@@ -62,6 +63,26 @@ module DatabaseCleaner
         # Patch for MysqlAdapter with ActiveRecord 3.2.7 later
         # select_value("SELECT 1") #=> "1"
         select_value("SELECT EXISTS (SELECT 1 FROM #{quote_table_name(table)} LIMIT 1)").to_i
+      end
+
+      def with_uncached_information_schema
+        if !supports_information_schema_stats_expiry?
+          return yield
+        end
+
+        # https://dev.mysql.com/doc/refman/8.0/en/information-schema-optimization.html
+        # https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_information_schema_stats_expiry
+        begin
+          old_stats_expiry = select_value("SELECT @@information_schema_stats_expiry")
+          update("SET information_schema_stats_expiry = 0")
+          yield
+        ensure
+          update("SET information_schema_stats_expiry = #{old_stats_expiry}")
+        end
+      end
+
+      def supports_information_schema_stats_expiry?
+        @supports_information_schema_stats_expiry ||= !select_value("SHOW VARIABLES LIKE 'information_schema_stats_expiry'").nil?
       end
 
       def auto_increment_value(table)

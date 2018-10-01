@@ -65,8 +65,8 @@ module DatabaseCleaner
         def truncate_table_by_deleting(table_name)
           @con.execute("DELETE FROM #{@con.quote_table_name(table_name)}")
 
-          if seed = @schema.seeds[table_name]
-            @con.execute("DBCC CHECKIDENT(#{@con.quote_table_name(table_name)}, RESEED, #{seed - 1}) WITH NO_INFOMSGS")
+          if reseed = @schema.reseeds[table_name]
+            @con.execute("DBCC CHECKIDENT(#{@con.quote_table_name(table_name)}, RESEED, #{reseed}) WITH NO_INFOMSGS")
           end
         end
       end
@@ -85,10 +85,10 @@ module DatabaseCleaner
           end
         end
 
-        def seeds
+        def reseeds
           # FIXME: permanent caching should depend on cache_tables option
-          @seeds ||= @con.select_rows(<<-SQL).to_h
-            SELECT t.name, c.seed_value
+          @reseeds ||= @con.select_rows(<<-SQL).to_h
+            SELECT t.name, CAST(c.seed_value AS int) - CAST(c.increment_value AS int)
             FROM sys.identity_columns c
             JOIN sys.tables t ON t.object_id = c.object_id
           SQL

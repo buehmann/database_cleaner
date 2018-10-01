@@ -14,6 +14,7 @@ end
 
 require "database_cleaner/generic/truncation"
 require 'database_cleaner/active_record/base'
+require 'database_cleaner/active_record/truncation/sqlserver'
 
 module DatabaseCleaner
   module ConnectionAdapters
@@ -197,6 +198,22 @@ module DatabaseCleaner
         rows.collect { |result| result.first }
       end
     end
+
+    module SQLServerAdapter
+      def truncate_tables(tables)
+        database_cleaner.truncate_tables(tables)
+      end
+
+      def pre_count_truncate_tables(tables, _)
+        database_cleaner.pre_count_truncate_tables(tables)
+      end
+
+      private
+
+      def database_cleaner
+        @database_cleaner ||= Cleaner.new(self)
+      end
+    end
   end
 end
 
@@ -219,7 +236,7 @@ module ActiveRecord
     SQLite3Adapter.class_eval { include ::DatabaseCleaner::ConnectionAdapters::SQLiteAdapter } if defined?(SQLite3Adapter)
     PostgreSQLAdapter.class_eval { include ::DatabaseCleaner::ConnectionAdapters::PostgreSQLAdapter } if defined?(PostgreSQLAdapter)
     IBM_DBAdapter.class_eval { include ::DatabaseCleaner::ConnectionAdapters::IBM_DBAdapter } if defined?(IBM_DBAdapter)
-    SQLServerAdapter.class_eval { include ::DatabaseCleaner::ConnectionAdapters::TruncateOrDelete } if defined?(SQLServerAdapter)
+    SQLServerAdapter.class_eval { include ::DatabaseCleaner::ConnectionAdapters::SQLServerAdapter } if defined?(SQLServerAdapter)
     OracleEnhancedAdapter.class_eval { include ::DatabaseCleaner::ConnectionAdapters::OracleAdapter } if defined?(OracleEnhancedAdapter)
   end
 end
@@ -231,7 +248,7 @@ module DatabaseCleaner::ActiveRecord
 
     def clean
       connection = connection_class.connection
-      connection.disable_referential_integrity do
+      disable_referential_integrity_hack!(connection) do
         if pre_count? && connection.respond_to?(:pre_count_truncate_tables)
           connection.pre_count_truncate_tables(tables_to_truncate(connection), {:reset_ids => reset_ids?})
         else
@@ -269,6 +286,18 @@ module DatabaseCleaner::ActiveRecord
 
     def reset_ids?
       @reset_ids != false
+    end
+
+    # FIXME: Move to adapters
+    def disable_referential_integrity_hack!(connection)
+      if defined?(ActiveRecord::ConnectionAdapters::SQLServerAdapter) \
+          && connection.is_a?(ActiveRecord::ConnectionAdapters::SQLServerAdapter)
+        yield
+      else
+        connection.disable_referential_integrity do
+          yield
+        end
+      end
     end
   end
 end

@@ -81,7 +81,7 @@ module DatabaseCleaner
             tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} NOCHECK CONSTRAINT ALL" }
             yield
           ensure
-            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} CHECK CONSTRAINT ALL" }
+            tables.each { |t| @con.execute "ALTER TABLE #{@con.quote_table_name(t)} WITH CHECK CHECK CONSTRAINT ALL" }
           end
         end
 

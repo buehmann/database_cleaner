@@ -55,6 +55,8 @@ module DatabaseCleaner
         filter = options[:reset_ids] ? method(:has_been_used?) : method(:has_rows?)
         filtered_tables = with_uncached_information_schema { tables.select(&filter) }
         truncate_tables(filtered_tables)
+      ensure
+        @auto_increment_values = nil
       end
 
       private
@@ -86,11 +88,14 @@ module DatabaseCleaner
       end
 
       def auto_increment_value(table)
-        select_value(<<-SQL).to_i
-          SELECT auto_increment
+        auto_increment_values[table]
+      end
+
+      def auto_increment_values
+        @auto_increment_values ||= select_rows(<<-SQL).to_h
+          SELECT table_name, auto_increment
           FROM information_schema.tables
-          WHERE table_name = '#{table}'
-          AND table_schema = database()
+          WHERE table_schema = database()
         SQL
       end
 
@@ -99,7 +104,7 @@ module DatabaseCleaner
       # increased the auto-increment counter, but then cleaned again such that
       # it appears empty now.
       def has_been_used?(table)
-        has_rows?(table) || auto_increment_value(table) > 1
+        has_rows?(table) || auto_increment_value(table).to_i > 1
       end
 
       def has_rows?(table)

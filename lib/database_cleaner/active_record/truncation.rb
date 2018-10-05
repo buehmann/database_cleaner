@@ -104,7 +104,8 @@ module DatabaseCleaner
       # increased the auto-increment counter, but then cleaned again such that
       # it appears empty now.
       def has_been_used?(table)
-        has_rows?(table) || auto_increment_value(table).to_i > 1
+        value = auto_increment_value(table)
+        value.nil? ? has_rows?(table) : auto_increment_value(table).to_i > 1
       end
 
       def has_rows?(table)

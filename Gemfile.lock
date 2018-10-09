@@ -17,6 +17,9 @@ GEM
       tzinfo (~> 0.3.23)
     activerecord-mysql2-adapter (0.0.3)
       mysql2
+    activerecord-sqlserver-adapter (3.0.7)
+      activerecord (~> 3.0.0)
+      arel (~> 1.0.0)
     activesupport (3.0.0)
     addressable (2.3.6)
     arel (1.0.1)
@@ -234,6 +237,7 @@ PLATFORMS
 DEPENDENCIES
   activerecord
   activerecord-mysql2-adapter
+  activerecord-sqlserver-adapter
   bson_ext
   bundler
   couch_potato
@@ -263,4 +267,4 @@ DEPENDENCIES
   tzinfo
 
 BUNDLED WITH
-   1.16.1
+   1.16.5

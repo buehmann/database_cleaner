@@ -64,6 +64,7 @@ Gem::Specification.new do |s|
     s.add_development_dependency 'pg'
     s.add_development_dependency "sqlite3-ruby" if RUBY_VERSION < "1.9"
     s.add_development_dependency "sqlite3" if RUBY_VERSION >= "1.9"
+    s.add_development_dependency "activerecord-sqlserver-adapter"
   else
     s.add_development_dependency "activerecord-jdbc-adapter"
   end

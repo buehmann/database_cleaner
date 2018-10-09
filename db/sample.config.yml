@@ -32,3 +32,11 @@ sqlite3:
   timeout: 5000
   encoding: utf8
 
+sqlserver:
+  adapter: sqlserver
+  database: database_cleaner_test
+  username:
+  password:
+  host: 127.0.0.1
+  port: 1433
+  encoding: utf8
